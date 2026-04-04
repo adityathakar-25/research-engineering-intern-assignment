@@ -1,11 +1,30 @@
-"""AI route — RAG-powered chatbot and summary generation."""
+"""AI route — Summary generation and Chat with Anthropic."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+import json
+import os
+import re
+
+import anthropic
+from fastapi import APIRouter, Body, Query
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api", tags=["ai"])
+
+# ── Setup Anthropic Client ──────────────────────────────────────────
+# Gracefully fall back to empty string if no key is provided,
+# handled during execution via try/except.
+_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+client = anthropic.Anthropic(api_key=_api_key)
+
+MODEL_NAME = "claude-sonnet-4-20250514"
+
+
+# ── Response models ─────────────────────────────────────────────────
+class SummaryResponse(BaseModel):
+    summary: str | None = None
+    error: str | None = None
 
 
 # ── Chat models ─────────────────────────────────────────────────────
@@ -21,62 +40,83 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    reply: str
-    sources: list[str]
-
-
-# ── Summary models ──────────────────────────────────────────────────
-class SummaryResponse(BaseModel):
-    query: str
-    chart_type: str
-    summary: str
-    key_findings: list[str]
+    answer: str | None = None
+    suggestions: list[str] | None = None
+    error: str | None = None
 
 
 # ── Routes ──────────────────────────────────────────────────────────
-@router.post("/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest):
-    """RAG-powered chatbot that answers questions grounded in post data.
-
-    When implemented: retrieves relevant posts from ChromaDB via semantic
-    search, constructs a prompt with the retrieved context, and calls an
-    LLM (e.g. Gemini / OpenAI) to generate a grounded answer. Returns
-    the reply and the post_ids used as sources.
-    """
-    return ChatResponse(
-        reply=(
-            f"Based on the data, here's what I found about '{body.message}': "
-            "The Anarchism subreddit shows the highest cross-posting activity, "
-            "with several authors bridging into Communalists. Key themes include "
-            "mutual aid, direct action, and social ecology theory."
-        ),
-        sources=["1ir8tnp", "1is3abc", "1it7xyz"],
-    )
-
-
+@router.post("/summary", response_model=SummaryResponse)
 @router.get("/summary", response_model=SummaryResponse)
 async def get_summary(
+    data: list | dict = Body(...),
     query: str = Query("", description="Topic or query to summarize"),
     chart_type: str = Query("timeseries", description="Which chart's data to summarize"),
 ):
-    """Generate an AI summary of chart data for a given query.
-
-    When implemented: fetches the relevant chart data, formats it into a
-    prompt, and asks an LLM to produce a concise narrative summary with
-    key findings.
-    """
-    return SummaryResponse(
-        query=query,
-        chart_type=chart_type,
-        summary=(
-            "Post activity peaked in mid-February 2025, driven primarily by "
-            "discussions around social ecology and mutual aid. The Anarchism "
-            "subreddit contributed 65% of total volume."
-        ),
-        key_findings=[
-            "Peak activity on Feb 14-15, 2025",
-            "Anarchism subreddit dominates with 65% of posts",
-            "Cross-posting between Anarchism and Communalists increased 3x",
-            "Key bridging authors: RevoltWriter, EcoAnarchist",
-        ],
+    """Generate an AI summary of chart data for a given query."""
+    system_prompt = (
+        "You are an analyst summarizing social media data for a non-technical audience. "
+        "Be specific — mention exact numbers, dates, and names from the data. Maximum 3 sentences."
     )
+
+    # Dump the data safely (up to 50 elements if it's a list)
+    if isinstance(data, list):
+        data_to_pass = data[:50]
+    else:
+        data_to_pass = data
+
+    user_prompt = (
+        f"Here is {chart_type} data for the query '{query}': "
+        f"{json.dumps(data_to_pass)}. Write a plain-language summary."
+    )
+
+    try:
+        response = client.messages.create(
+            model=MODEL_NAME,
+            max_tokens=250,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}]
+        )
+        return SummaryResponse(summary=response.content[0].text)
+    except Exception as e:
+        return SummaryResponse(error="AI service unavailable")
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(body: ChatRequest):
+    """RAG-powered chatbot that answers questions grounded in data patterns."""
+    system_prompt = (
+        "You are an analyst assistant for NarrativeTrace, a social media analysis dashboard studying information integrity. "
+        f"The user is currently analyzing: {body.context}. Answer based on data patterns. "
+        "After answering, always end with: SUGGESTIONS: [query1] | [query2] | [query3]"
+    )
+
+    # Build multi-turn messages
+    messages = []
+    for m in body.history:
+        messages.append({"role": m.role, "content": m.content})
+    messages.append({"role": "user", "content": body.message})
+
+    try:
+        response = client.messages.create(
+            model=MODEL_NAME,
+            max_tokens=500,
+            system=system_prompt,
+            messages=messages
+        )
+        full_text = response.content[0].text
+
+        # Parse suggestions pattern: SUGGESTIONS: [one] | [two] | [three]
+        suggestions_match = re.search(r"SUGGESTIONS:\s*(.*)", full_text, flags=re.IGNORECASE)
+        suggestions = []
+        if suggestions_match:
+            raw_sugs = suggestions_match.group(1).split("|")
+            suggestions = [s.strip().strip("[]") for s in raw_sugs if s.strip()]
+            # Remove the SUGGESTIONS line from the final answer text
+            answer = re.sub(r"SUGGESTIONS:\s*(.*)", "", full_text, flags=re.IGNORECASE).strip()
+        else:
+            answer = full_text.strip()
+
+        return ChatResponse(answer=answer, suggestions=suggestions)
+    except Exception as e:
+        return ChatResponse(error="AI service unavailable")
