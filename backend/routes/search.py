@@ -33,8 +33,8 @@ def _get_model():
 
 # ── Request / Response models ───────────────────────────────────────
 class SearchRequest(BaseModel):
-    query: str = Field(..., description="Natural-language search query")
-    limit: int = Field(20, ge=1, le=100, description="Max results to return")
+    query: str = Field(..., min_length=0, max_length=500, description="Natural-language search query")
+    limit: int = Field(20, ge=1, le=200, description="Max results to return")
 
 
 class SearchResult(BaseModel):

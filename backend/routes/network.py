@@ -94,8 +94,8 @@ def _build_graph(df) -> nx.DiGraph:
 # ── Route ───────────────────────────────────────────────────────────
 @router.get("/network", response_model=NetworkResponse)
 async def get_network(
-    query: str = Query(..., description="Search query to filter posts"),
-    limit: int = Query(100, ge=1, le=500, description="Max nodes to return"),
+    query: str = Query(..., min_length=0, max_length=500, description="Search query to filter posts"),
+    limit: int = Query(100, ge=1, le=200, description="Max nodes to return"),
 ):
     """Return an author co-posting network graph.
 

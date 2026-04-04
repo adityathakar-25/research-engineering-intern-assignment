@@ -63,7 +63,7 @@ def _get_top_tokens(texts: list[str]) -> str:
 # ── Route ───────────────────────────────────────────────────────────
 @router.get("/clusters", response_model=ClustersResponse)
 async def get_clusters(
-    query: str = Query("", description="Search query to filter posts"),
+    query: str = Query("", min_length=0, max_length=500, description="Search query to filter posts"),
     n_clusters: int = Query(8, ge=1, le=50, description="Number of clusters"),
 ):
     """Return UMAP-projected points with HDBSCAN cluster labels."""

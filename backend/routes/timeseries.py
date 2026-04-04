@@ -32,7 +32,7 @@ class TimeseriesResponse(BaseModel):
 # ── Route ───────────────────────────────────────────────────────────
 @router.get("/timeseries", response_model=TimeseriesResponse)
 async def get_timeseries(
-    query: str = Query(..., description="Search query to filter posts"),
+    query: str = Query(..., min_length=0, max_length=500, description="Search query to filter posts"),
     start: str | None = Query(None, description="Start date (YYYY-MM-DD). Omit for earliest."),
     end: str | None = Query(None, description="End date (YYYY-MM-DD). Omit for latest."),
     platform: str | None = Query(None, description="Platform filter: 'reddit' or 'twitter'"),
@@ -77,7 +77,10 @@ async def get_timeseries(
     # Apply optional date filters
     if start:
         from datetime import date as _date
-        s = _date.fromisoformat(start)
+        try:
+            s = _date.fromisoformat(start)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start date format. Use YYYY-MM-DD.")
         df = df[df["date"] >= s]
         used_start = str(s)
     else:
@@ -85,7 +88,10 @@ async def get_timeseries(
 
     if end:
         from datetime import date as _date
-        e = _date.fromisoformat(end)
+        try:
+            e = _date.fromisoformat(end)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end date format. Use YYYY-MM-DD.")
         df = df[df["date"] <= e]
         used_end = str(e)
     else:

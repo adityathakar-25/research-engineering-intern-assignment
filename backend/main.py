@@ -41,3 +41,16 @@ app.include_router(ai.router)
 async def health():
     """Simple liveness probe."""
     return {"status": "ok"}
+
+
+# ── Global Exception Handler ────────────────────────────────────────
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all to safely return 500 without exposing stack trace."""
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc), "code": 500}
+    )

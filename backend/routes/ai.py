@@ -120,3 +120,17 @@ async def chat(body: ChatRequest):
         return ChatResponse(answer=answer, suggestions=suggestions)
     except Exception as e:
         return ChatResponse(error="AI service unavailable")
+
+@router.get("/nomic-url")
+async def get_nomic_url():
+    """Returns the Nomic mapping URL or local filepath endpoint statically."""
+    from pathlib import Path
+    url_file = Path("data/nomic_url.txt")
+    if not url_file.exists():
+        return {"url": None}
+        
+    url = url_file.read_text(encoding="utf-8").strip()
+    if url == "local":
+        return {"url": "/embedding_viz.html"}
+        
+    return {"url": url}
