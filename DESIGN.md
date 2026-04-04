@@ -1,36 +1,36 @@
 # NarrativeTrace — Design Document
 
 ## Case Study
-Russian state media (RT, Sputnik) amplification patterns on Reddit and Twitter
-during the 2022 Ukraine invasion (Jan 2022 – Dec 2022).
+Leftist political ideology spread across Reddit (February 2025).
+Subreddits: r/Anarchism, r/Communalists, and related communities.
 
 ## The Story
-On February 24 2022, Russia invaded Ukraine. RT and Sputnik links flooded 
-Reddit and Twitter. Within weeks, both platforms banned these outlets. 
-NarrativeTrace answers: Who was amplifying these narratives? Did banning 
-actually work, or did the content migrate elsewhere? Which communities were 
-most active, and who were the key nodes in the sharing network?
+How do anarchist and leftist ideological narratives spread across Reddit?
+NarrativeTrace answers: Which subreddits cross-post the same content?
+Who are the key amplifiers bridging communities? What ideological clusters
+exist — anarcho-nihilism vs social ecology vs communalism? Do bans or
+removals affect narrative reach?
 
 ## Five Core Views
-1. **Time-series** — Daily post volume around Feb 24 invasion date and 
-   ban dates. Shows the spike, the ban effect, and post-ban behavior.
-2. **Network graph** — Author co-sharing network with PageRank centrality 
-   and Louvain communities. "Remove top node" shows network resilience.
-3. **Topic clusters** — UMAP+HDBSCAN clusters showing what narratives 
-   were being pushed (bioweapons, NATO, Zelensky, sanctions).
-4. **Semantic search** — Find posts about "Western propaganda" without 
+1. Time-series — Daily post volume per subreddit over Feb 2025.
+   Shows activity spikes and community engagement patterns.
+2. Network graph — Author co-posting network with PageRank centrality
+   and Louvain communities. Shows who bridges multiple subreddits.
+3. Topic clusters — UMAP+HDBSCAN clusters revealing ideological camps
+   (nihilism, social ecology, mutual aid, direct action, theory).
+4. Semantic search — Find posts about "rejecting state authority" without
    those keywords — tests genuine semantic retrieval.
-5. **AI chatbot** — Ask "what happened after the RT ban?" and get an 
-   answer grounded in actual data.
+5. AI chatbot — Ask "which authors post across multiple communities?"
+   and get an answer grounded in actual data.
 
 ## Data Flow
-raw CSV → preprocess.py → clean.parquet → embed.py → ChromaDB
-                                        ↓
-                               FastAPI routes → Next.js frontend
+data.jsonl → preprocess.py → clean.parquet → embed.py → ChromaDB
+                                            ↓
+                                   FastAPI routes → Next.js frontend
 
-## Edge Cases to Handle
-- Empty search query → 400 with message
-- Non-English query (Russian text) → embed and search anyway
-- n_clusters at extremes (1, 50) → cap gracefully, never crash
-- Graph with < 3 nodes → show message, not broken graph
-- Date range with no data → empty state card, not error
+## Edge Cases
+- Empty search → 400
+- Non-English query → embed and search anyway
+- n_clusters extremes (1, 50) → cap gracefully
+- Graph < 3 nodes → message not broken graph
+- Date range with no data → empty state card
