@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dotenv import load_dotenv
 from pathlib import Path
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent / ".env")
 
 import os
 
@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from backend.routes import ai, clusters, network, search, timeseries
+from routes import ai, clusters, network, search, timeseries
 
 # ── App setup ───────────────────────────────────────────────────────
 app = FastAPI(

@@ -13,7 +13,7 @@ colorama==0.4.6
 distro==1.9.0
 docstring_parser==0.17.0
 durationpy==0.10
-fastapi==0.135.3
+fastapi==0.104.1
 filelock==3.25.2
 flatbuffers==25.12.19
 fsspec==2026.3.0
@@ -98,7 +98,7 @@ typing_extensions==4.15.0
 tzdata==2026.1
 umap-learn==0.5.11
 urllib3==2.6.3
-uvicorn==0.43.0
+uvicorn==0.24.0
 watchfiles==1.1.1
 websocket-client==1.9.0
 websockets==16.0

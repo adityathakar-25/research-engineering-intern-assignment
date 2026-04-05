@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.data_loader import get_dataframe
+from data_loader import get_dataframe
 
 router = APIRouter(prefix="/api", tags=["timeseries"])
 

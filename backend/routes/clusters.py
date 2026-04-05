@@ -14,8 +14,8 @@ from pydantic import BaseModel
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 
-from backend.data_loader import get_dataframe
-from backend.routes.search import _get_collection
+from data_loader import get_dataframe
+from routes.search import _get_collection
 
 router = APIRouter(prefix="/api", tags=["clusters"])
 

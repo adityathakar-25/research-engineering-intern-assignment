@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from main import app
 
 client = TestClient(app)
 
@@ -15,7 +15,7 @@ def test_summary_success():
     mock_msg = MagicMock()
     mock_msg.content = [MagicMock(text="This is a summary. With exact numbers.")]
     
-    with patch("backend.routes.ai.client.messages.create", return_value=mock_msg) as mock_create:
+    with patch("routes.ai.client.messages.create", return_value=mock_msg) as mock_create:
         resp = client.post(
             "/api/summary",
             params={"query": "test", "chart_type": "timeseries"},
@@ -38,7 +38,7 @@ def test_summary_success():
 
 def test_summary_api_error():
     """Test that summary handles API errors without crashing."""
-    with patch("backend.routes.ai.client.messages.create", side_effect=Exception("API Down")):
+    with patch("routes.ai.client.messages.create", side_effect=Exception("API Down")):
         resp = client.post(
             "/api/summary",
             params={"query": "test", "chart_type": "network"},
@@ -54,7 +54,7 @@ def test_chat_success():
     mock_msg = MagicMock()
     mock_msg.content = [MagicMock(text=mock_text)]
     
-    with patch("backend.routes.ai.client.messages.create", return_value=mock_msg) as mock_create:
+    with patch("routes.ai.client.messages.create", return_value=mock_msg) as mock_create:
         resp = client.post(
             "/api/chat",
             json={
@@ -86,7 +86,7 @@ def test_chat_success():
 
 def test_chat_api_error():
     """Test that chat gracefully handles API errors."""
-    with patch("backend.routes.ai.client.messages.create", side_effect=Exception("Timeout")):
+    with patch("routes.ai.client.messages.create", side_effect=Exception("Timeout")):
         resp = client.post(
             "/api/chat",
             json={"message": "hello"}
