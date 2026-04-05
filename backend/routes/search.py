@@ -158,7 +158,14 @@ async def search_posts(body: SearchRequest):
     # ── Suggested queries from the top result ───────────────────────
     suggested: list[str] = []
     if search_results:
-        suggested = _extract_suggestions(search_results[0].text)
+        top_subreddit = search_results[0].community
+        q = body.query
+        if top_subreddit:
+            suggested.append(f"{q} in r/{top_subreddit}")
+        else:
+            suggested.append(f"{q} community")
+        suggested.append(f"{q} controversy")
+        suggested.append(f"{q} discussion")
 
     return SearchResponse(
         query=body.query,

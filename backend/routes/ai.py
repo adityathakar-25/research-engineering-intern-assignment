@@ -1,24 +1,50 @@
-"""AI route — Summary generation and Chat with Anthropic."""
+"""AI route — Summary generation and Chat with Google Gemini (google-genai SDK)."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
+import time
 
-import anthropic
-from fastapi import APIRouter, Body, Query
+from google import genai
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api", tags=["ai"])
 
-# ── Setup Anthropic Client ──────────────────────────────────────────
-# Gracefully fall back to empty string if no key is provided,
-# handled during execution via try/except.
-_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-client = anthropic.Anthropic(api_key=_api_key)
+GEMINI_MODEL = "gemini-2.0-flash"
 
-MODEL_NAME = "claude-sonnet-4-20250514"
+# Simple in-memory cache for summaries
+summary_cache: dict = {}
+
+
+# ── Gemini client factory ────────────────────────────────────────────
+def get_client():
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise ValueError("GEMINI_API_KEY not set")
+    return genai.Client(api_key=key)
+
+
+def _generate_with_retry(client, prompt: str, max_retries: int = 3) -> str:
+    """Call Gemini with exponential backoff on rate-limit errors."""
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+            )
+            return response.text
+        except Exception as e:
+            err_str = str(e).lower()
+            is_rate_limit = "429" in err_str or "resource_exhausted" in err_str or "rate" in err_str
+            if is_rate_limit and attempt < max_retries - 1:
+                wait = 2 ** (attempt + 1)   # 2s, 4s, 8s
+                print(f"[gemini] Rate limited, retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
 
 
 # ── Response models ─────────────────────────────────────────────────
@@ -27,16 +53,21 @@ class SummaryResponse(BaseModel):
     error: str | None = None
 
 
-# ── Chat models ─────────────────────────────────────────────────────
+class SummaryRequest(BaseModel):
+    query: str = Field("", description="Topic or query to summarize")
+    chart_type: str = Field("timeseries", description="Which chart's data to summarize")
+    data: list = Field(default_factory=list, description="Chart data to summarize")
+
+
 class ChatMessage(BaseModel):
-    role: str  # "user" or "assistant"
+    role: str
     content: str
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User message")
-    history: list[ChatMessage] = Field(default_factory=list, description="Prior conversation turns")
-    context: str = Field("", description="Optional context filter (e.g. community name)")
+    history: list[ChatMessage] = Field(default_factory=list)
+    context: str = Field("", description="Dashboard context")
 
 
 class ChatResponse(BaseModel):
@@ -47,90 +78,97 @@ class ChatResponse(BaseModel):
 
 # ── Routes ──────────────────────────────────────────────────────────
 @router.post("/summary", response_model=SummaryResponse)
-@router.get("/summary", response_model=SummaryResponse)
-async def get_summary(
-    data: list | dict = Body(...),
-    query: str = Query("", description="Topic or query to summarize"),
-    chart_type: str = Query("timeseries", description="Which chart's data to summarize"),
-):
+async def get_summary(body: SummaryRequest):
     """Generate an AI summary of chart data for a given query."""
+
+    # Check cache first
+    cache_key = (body.query, body.chart_type)
+    if cache_key in summary_cache:
+        ts, cached = summary_cache[cache_key]
+        if time.time() - ts < 60:
+            return SummaryResponse(summary=cached)
+
+    try:
+        client = get_client()
+    except ValueError:
+        return SummaryResponse(error="AI service unavailable")
+
     system_prompt = (
         "You are an analyst summarizing social media data for a non-technical audience. "
         "Be specific — mention exact numbers, dates, and names from the data. Maximum 3 sentences."
     )
 
-    # Dump the data safely (up to 50 elements if it's a list)
-    if isinstance(data, list):
-        data_to_pass = data[:50]
-    else:
-        data_to_pass = data
-
     user_prompt = (
-        f"Here is {chart_type} data for the query '{query}': "
-        f"{json.dumps(data_to_pass)}. Write a plain-language summary."
+        f"Here is {body.chart_type} data for the query '{body.query}': "
+        f"{json.dumps(body.data[:50])}. Write a plain-language summary."
     )
 
+    full_prompt = f"{system_prompt}\n\n{user_prompt}"
+
     try:
-        response = client.messages.create(
-            model=MODEL_NAME,
-            max_tokens=250,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
-        )
-        return SummaryResponse(summary=response.content[0].text)
+        text = _generate_with_retry(client, full_prompt)
+        summary_cache[cache_key] = (time.time(), text)
+        return SummaryResponse(summary=text)
     except Exception as e:
-        return SummaryResponse(error="AI service unavailable")
+        print(f"[summary] Gemini error: {e}")
+        return SummaryResponse(error="AI rate limited — try again in a minute")
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest):
-    """RAG-powered chatbot that answers questions grounded in data patterns."""
-    system_prompt = (
-        "You are an analyst assistant for NarrativeTrace, a social media analysis dashboard studying information integrity. "
-        f"The user is currently analyzing: {body.context}. Answer based on data patterns. "
-        "After answering, always end with: SUGGESTIONS: [query1] | [query2] | [query3]"
-    )
-
-    # Build multi-turn messages
-    messages = []
-    for m in body.history:
-        messages.append({"role": m.role, "content": m.content})
-    messages.append({"role": "user", "content": body.message})
+    """Chatbot that answers questions grounded in data patterns."""
 
     try:
-        response = client.messages.create(
-            model=MODEL_NAME,
-            max_tokens=500,
-            system=system_prompt,
-            messages=messages
-        )
-        full_text = response.content[0].text
+        client = get_client()
+    except ValueError:
+        return ChatResponse(error="AI service unavailable")
 
-        # Parse suggestions pattern: SUGGESTIONS: [one] | [two] | [three]
+    system_prompt = (
+        "You are a data analyst assistant for NarrativeTrace. "
+        "You have full access to analyze the Reddit dataset (Feb 2025, 8799 posts). "
+        "Always give specific answers with actual names, numbers, and subreddits from the data. "
+        "Never say you cannot access data — you are summarizing patterns from the dashboard's live data.\n"
+        f"Current context: {body.context}\n"
+        "After answering, end with: SUGGESTIONS: [q1] | [q2] | [q3]"
+    )
+
+    history_text = ""
+    for m in body.history:
+        role_label = "User" if m.role == "user" else "Assistant"
+        history_text += f"{role_label}: {m.content}\n"
+
+    full_prompt = (
+        f"{system_prompt}\n\n"
+        f"{history_text}"
+        f"User: {body.message}\nAssistant:"
+    )
+
+    try:
+        full_text = _generate_with_retry(client, full_prompt)
+
         suggestions_match = re.search(r"SUGGESTIONS:\s*(.*)", full_text, flags=re.IGNORECASE)
         suggestions = []
         if suggestions_match:
             raw_sugs = suggestions_match.group(1).split("|")
             suggestions = [s.strip().strip("[]") for s in raw_sugs if s.strip()]
-            # Remove the SUGGESTIONS line from the final answer text
             answer = re.sub(r"SUGGESTIONS:\s*(.*)", "", full_text, flags=re.IGNORECASE).strip()
         else:
             answer = full_text.strip()
 
         return ChatResponse(answer=answer, suggestions=suggestions)
     except Exception as e:
-        return ChatResponse(error="AI service unavailable")
+        print(f"[chat] Gemini error: {e}")
+        return ChatResponse(error="AI rate limited — try again in a minute")
+
 
 @router.get("/nomic-url")
 async def get_nomic_url():
-    """Returns the Nomic mapping URL or local filepath endpoint statically."""
+    """Returns the Nomic mapping URL or local filepath."""
     from pathlib import Path
     url_file = Path("data/nomic_url.txt")
     if not url_file.exists():
         return {"url": None}
-        
     url = url_file.read_text(encoding="utf-8").strip()
     if url == "local":
         return {"url": "/embedding_viz.html"}
-        
     return {"url": url}

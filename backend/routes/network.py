@@ -13,7 +13,7 @@ from backend.data_loader import get_dataframe
 router = APIRouter(prefix="/api", tags=["network"])
 
 # ── Tunables ────────────────────────────────────────────────────────
-_CO_WINDOW = np.timedelta64(24, "h")
+_CO_WINDOW = np.timedelta64(7 * 24, "h")   # 7 days — wider window for sparse dataset
 _MAX_DISPLAY_NODES = 200
 
 
@@ -46,9 +46,10 @@ class NetworkResponse(BaseModel):
 def _build_graph(df) -> nx.DiGraph:
     """Build a directed co-posting graph from the filtered dataframe.
 
-    Two authors share an edge if they posted in the same community
-    within 24 hours of each other. Edge weight = number of such
-    co-occurrences.
+    Two authors share an edge if they posted in the same subreddit
+    within 7 days of each other. Edge weight = number of such
+    co-occurrences. Grouping by subreddit (community) gives far more
+    connections on a small dataset than grouping by thread.
     """
     G = nx.DiGraph()
 
@@ -57,9 +58,10 @@ def _build_graph(df) -> nx.DiGraph:
     for author, count in post_counts.items():
         G.add_node(author, post_count=count)
 
-    # Group by community, then check temporal co-occurrence
-    for _community, group in df.groupby("community"):
-        # Sort by timestamp for efficient window checking
+    # Group by subreddit/community, then check temporal co-occurrence
+    group_col = "community" if "community" in df.columns else "platform"
+    for _subreddit, group in df.groupby(group_col):
+        # Sort by timestamp for efficient sliding-window checking
         group = group.sort_values("timestamp")
         authors = group["author"].values
         timestamps = group["timestamp"].values
@@ -71,7 +73,7 @@ def _build_graph(df) -> nx.DiGraph:
                 # All comparisons stay in numpy timedelta64 space
                 delta = timestamps[j] - ts_i
                 if delta > _CO_WINDOW:
-                    break
+                    break  # sorted, so no further j can be within window
 
                 a_i, a_j = str(authors[i]), str(authors[j])
                 if a_i == a_j:
@@ -112,8 +114,9 @@ async def get_network(
     mask = df["text"].str.contains(query, case=False, na=False)
     df = df[mask]
 
-    # ── Edge case: fewer than 3 matching posts ──────────────────────
-    if len(df) < 3:
+    # ── Edge case: fewer than 2 matching posts ──────────────────────
+    min_posts = 2 if len(query.strip()) > 2 else 3
+    if len(df) < min_posts:
         return NetworkResponse(
             query=query,
             node_count=0,

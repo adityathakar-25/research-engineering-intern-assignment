@@ -7,9 +7,11 @@ from collections import Counter
 from typing import Optional
 
 import hdbscan
+import numpy as np
 import umap
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
+from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 
 from backend.data_loader import get_dataframe
@@ -17,7 +19,23 @@ from backend.routes.search import _get_collection
 
 router = APIRouter(prefix="/api", tags=["clusters"])
 
-STOPWORDS = {"the", "a", "is", "and", "to", "of", "in", "it", "for", "on", "that", "this", "with", "was", "are"}
+STOPWORDS = {
+    "the","a","is","and","to","of","in","it","for","on",
+    "that","this","with","was","are","be","as","at","by",
+    "we","i","my","me","you","your","he","she","they","them",
+    "have","has","had","but","or","an","so","if","do","not",
+    "what","all","were","when","there","can","more","about",
+    "up","out","who","get","just","one","how","its","also",
+    "from","been","their","will","would","could","should",
+    "which","than","then","now","into","our","after","over",
+    "these","those","some","any","her","him","his","she",
+    "monday","tuesday","wednesday","thursday","friday",
+    "project","need","let","know","going","want","think",
+    "people","like","make","time","new","use","look","see",
+    "come","take","way","even","well","back","through","where",
+    "much","because","here","still","between","before","never",
+    "us","t","m","s","re","ve","ll","d","am","pm",
+}
 
 
 # ── Response models ─────────────────────────────────────────────────
@@ -46,18 +64,16 @@ class ClustersResponse(BaseModel):
 
 # ── Helpers ─────────────────────────────────────────────────────────
 def _get_top_tokens(texts: list[str]) -> str:
-    """Extract top 5 non-stopword tokens from texts."""
+    """Extract top 3 non-stopword tokens from texts, formatted as title case."""
     counter = Counter()
     for text in texts:
-        # Extract purely lowercase words
         words = re.findall(r'[a-z]+', text.lower())
         for w in words:
-            if w not in STOPWORDS:
+            if len(w) > 2 and w not in STOPWORDS:
                 counter[w] += 1
-    
-    # Get top 5
-    top = [w for w, _ in counter.most_common(5)]
-    return ", ".join(top) if top else "Unlabeled"
+
+    top = [w.title() for w, _ in counter.most_common(3)]
+    return " · ".join(top) if top else "Unlabeled"
 
 
 # ── Route ───────────────────────────────────────────────────────────
@@ -90,9 +106,15 @@ async def get_clusters(
     metadatas = results.get("metadatas", [])
     n_posts = len(embeddings)
     
-    if n_posts == 0:
-        return ClustersResponse(clusters=[], total_posts=0, noise_count=0, actual_clusters=0)
-        
+    if n_posts < 5:
+        return ClustersResponse(clusters=[], total_posts=0, noise_count=0, actual_clusters=0,
+                                warning="Not enough posts to cluster. Try a broader query.")
+
+    # ── Smart default n_clusters for small datasets ─────────────────
+    # Caller sent the default (8) but dataset is small — quietly reduce
+    if n_posts < 100 and n_clusters == 8:
+        n_clusters = max(2, min(4, n_posts // 3))
+
     warning = None
     
     # ── Dimensionality Reduction ────────────────────────────────────
@@ -128,13 +150,26 @@ async def get_clusters(
             w_msg = f"Requested {n_clusters} clusters but only had {n_posts} posts. Capped n_clusters to {capped_n_clusters}."
             warning = w_msg if not warning else warning + " " + w_msg
             
-        # ── Clustering ──────────────────────────────────────────────
+        # ── Clustering: HDBSCAN with KMeans fallback ─────────────────
         if capped_n_clusters <= 1:
             labels = [0] * n_posts
         else:
-            min_cluster_size = max(5, n_posts // capped_n_clusters)
-            clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size)
+            min_cluster_size = max(2, n_posts // 20)
+            clusterer = hdbscan.HDBSCAN(
+                min_cluster_size=min_cluster_size,
+                min_samples=1,
+                cluster_selection_epsilon=0.3
+            )
             labels = clusterer.fit_predict(coords)
+
+            # If >70% noise, fall back to KMeans
+            noise_ratio = np.sum(np.array(labels) == -1) / len(labels)
+            if noise_ratio > 0.70:
+                fallback_k = min(capped_n_clusters, max(2, n_posts // 3))
+                km = KMeans(n_clusters=fallback_k, random_state=42, n_init=10)
+                labels = km.fit_predict(coords)
+                km_msg = f"Used KMeans fallback (k={fallback_k}) — dataset too small for HDBSCAN"
+                warning = km_msg if not warning else warning + " " + km_msg
             
     # ── Group by cluster label ──────────────────────────────────────
     cluster_map = {}

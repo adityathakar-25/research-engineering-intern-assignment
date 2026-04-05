@@ -15,7 +15,8 @@ PARQUET_PATH = BASE_DIR / "data" / "processed" / "clean.parquet"
 def get_dataframe() -> pd.DataFrame:
     """Load the cleaned parquet file into a DataFrame (cached after first call)."""
     df = pd.read_parquet(PARQUET_PATH)
-    # Ensure timestamp is datetime for downstream filtering
-    if not pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
-        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    # Always parse as UTC then strip timezone so dt.date gives correct calendar dates.
+    # This prevents the X-axis from showing wrong years (e.g. Jul 2024 vs Feb 2025).
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    df["timestamp"] = df["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
     return df

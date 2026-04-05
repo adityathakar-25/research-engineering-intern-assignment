@@ -1,17 +1,18 @@
 """NarrativeTrace — FastAPI backend application."""
-
 from __future__ import annotations
+
+from dotenv import load_dotenv
+from pathlib import Path
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 import os
 
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
 from backend.routes import ai, clusters, network, search, timeseries
-
-# ── Load environment variables ──────────────────────────────────────
-load_dotenv()
 
 # ── App setup ───────────────────────────────────────────────────────
 app = FastAPI(
@@ -22,7 +23,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.1.20:3000"
+    ],
+    allow_origin_regex=r"http://.*:3000",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
