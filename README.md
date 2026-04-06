@@ -31,7 +31,7 @@ graph TD
 | Network centrality | PageRank | alpha=0.85 | networkx |
 | Community detection | Louvain | default resolution | python-louvain |
 | Semantic search | ChromaDB vector store | cosine distance, top-k retrieval | chromadb |
-| AI summaries + chat | Claude claude-sonnet-4-20250514 | max_tokens=300 | anthropic |
+| AI summaries + chat | Llama3 8B (llama3-8b-8192) | temperature=0.7 | groq |
 
 ## Semantic Search Examples (Zero Keyword Overlap)
 
@@ -68,7 +68,7 @@ pip install -r requirements.txt
 # Run the Uvicorn ASGI server
 uvicorn main:app --reload --port 8000
 ```
-*Note: Ensure your `.env` contains your `ANTHROPIC_API_KEY` for AI functionalities.*
+*Note: Ensure your `.env` contains your `GROQ_API_KEY` for AI functionalities.*
 
 ### 2. Node Frontend setup (Terminal 2)
 ```bash

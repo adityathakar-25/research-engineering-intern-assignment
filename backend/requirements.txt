@@ -9,7 +9,7 @@ networkx
 umap-learn
 hdbscan
 scikit-learn
-google-genai
+groq
 python-dotenv
 pydantic
 numpy

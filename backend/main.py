@@ -3,9 +3,19 @@ from __future__ import annotations
 
 from dotenv import load_dotenv
 from pathlib import Path
-load_dotenv(Path(__file__).parent / ".env")
+env_path = Path(__file__).parent / ".env"
+if not env_path.exists():
+    env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 import os
+import sys
+
+# Ensure the backend directory is in the path to allow 'routes' to be imported
+# when someone runs `uvicorn backend.main:app` from the project root.
+backend_dir = str(Path(__file__).parent.resolve())
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

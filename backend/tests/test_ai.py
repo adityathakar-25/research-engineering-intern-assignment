@@ -13,9 +13,11 @@ client = TestClient(app)
 def test_summary_success():
     """Test successful summary generation with mocked Anthropic."""
     mock_msg = MagicMock()
-    mock_msg.content = [MagicMock(text="This is a summary. With exact numbers.")]
+    mock_choice = MagicMock()
+    mock_choice.message.content = "This is a summary. With exact numbers."
+    mock_msg.choices = [mock_choice]
     
-    with patch("routes.ai.client.messages.create", return_value=mock_msg) as mock_create:
+    with patch("routes.ai.client.chat.completions.create", return_value=mock_msg) as mock_create:
         resp = client.post(
             "/api/summary",
             params={"query": "test", "chart_type": "timeseries"},
@@ -28,17 +30,17 @@ def test_summary_success():
         # Verify call params
         mock_create.assert_called_once()
         kwargs = mock_create.call_args.kwargs
-        system_p = kwargs["system"]
+        system_p = kwargs["messages"][0]["content"]
         assert "mention exact numbers" in system_p
         
-        user_p = kwargs["messages"][0]["content"]
+        user_p = kwargs["messages"][1]["content"]
         assert "timeseries data for the query 'test'" in user_p
         assert "2022-02-24" in user_p
 
 
 def test_summary_api_error():
     """Test that summary handles API errors without crashing."""
-    with patch("routes.ai.client.messages.create", side_effect=Exception("API Down")):
+    with patch("routes.ai.client.chat.completions.create", side_effect=Exception("API Down")):
         resp = client.post(
             "/api/summary",
             params={"query": "test", "chart_type": "network"},
@@ -52,9 +54,11 @@ def test_chat_success():
     """Test successful chat generation and SUGGESTIONS parsing."""
     mock_text = "Here is the analysis based on data.\nSUGGESTIONS: [how did reddit react?] | [what about twitter?] | [key authors]"
     mock_msg = MagicMock()
-    mock_msg.content = [MagicMock(text=mock_text)]
+    mock_choice = MagicMock()
+    mock_choice.message.content = mock_text
+    mock_msg.choices = [mock_choice]
     
-    with patch("routes.ai.client.messages.create", return_value=mock_msg) as mock_create:
+    with patch("routes.ai.client.chat.completions.create", return_value=mock_msg) as mock_create:
         resp = client.post(
             "/api/chat",
             json={
@@ -75,18 +79,18 @@ def test_chat_success():
         
         # Verify system prompt config
         kwargs = mock_create.call_args.kwargs
-        assert "r/Anarchism" in kwargs["system"]
+        assert "r/Anarchism" in kwargs["messages"][0]["content"]
         
         # Verify history got mapped correctly
         msgs = kwargs["messages"]
-        assert len(msgs) == 3
-        assert msgs[0]["content"] == "hello"
+        assert len(msgs) == 4
+        assert msgs[1]["content"] == "hello"
         assert msgs[-1]["content"] == "analyze this"
 
 
 def test_chat_api_error():
     """Test that chat gracefully handles API errors."""
-    with patch("routes.ai.client.messages.create", side_effect=Exception("Timeout")):
+    with patch("routes.ai.client.chat.completions.create", side_effect=Exception("Timeout")):
         resp = client.post(
             "/api/chat",
             json={"message": "hello"}

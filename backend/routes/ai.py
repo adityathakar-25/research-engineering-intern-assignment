@@ -1,4 +1,4 @@
-"""AI route — Summary generation and Chat with Google Gemini (google-genai SDK)."""
+"""AI route — Summary generation and Chat with Groq SDK."""
 
 from __future__ import annotations
 
@@ -7,41 +7,43 @@ import os
 import re
 import time
 
-from google import genai
+from groq import Groq
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api", tags=["ai"])
 
-GEMINI_MODEL = "gemini-2.0-flash"
+# Use the currently supported Groq model
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 # Simple in-memory cache for summaries
 summary_cache: dict = {}
 
 
-# ── Gemini client factory ────────────────────────────────────────────
+# ── Groq client factory ────────────────────────────────────────────
 def get_client():
-    key = os.getenv("GEMINI_API_KEY")
+    key = os.getenv("GROQ_API_KEY")
     if not key:
-        raise ValueError("GEMINI_API_KEY not set")
-    return genai.Client(api_key=key)
+        raise ValueError("GROQ_API_KEY not set")
+    return Groq(api_key=key)
 
 
-def _generate_with_retry(client, prompt: str, max_retries: int = 3) -> str:
-    """Call Gemini with exponential backoff on rate-limit errors."""
+def _generate_with_retry(client, messages: list, max_retries: int = 3) -> str:
+    """Call Groq with exponential backoff on rate-limit errors."""
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                temperature=0.7,
             )
-            return response.text
+            return response.choices[0].message.content or ""
         except Exception as e:
             err_str = str(e).lower()
-            is_rate_limit = "429" in err_str or "resource_exhausted" in err_str or "rate" in err_str
+            is_rate_limit = "429" in err_str or "rate" in err_str
             if is_rate_limit and attempt < max_retries - 1:
                 wait = 2 ** (attempt + 1)   # 2s, 4s, 8s
-                print(f"[gemini] Rate limited, retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                print(f"[groq] Rate limited, retrying in {wait}s (attempt {attempt+1}/{max_retries})")
                 time.sleep(wait)
             else:
                 raise
@@ -91,7 +93,7 @@ async def get_summary(body: SummaryRequest):
     try:
         client = get_client()
     except ValueError:
-        return SummaryResponse(error="AI service unavailable")
+        return SummaryResponse(error="AI service unavailable (Key missing)")
 
     system_prompt = (
         "You are an analyst summarizing social media data for a non-technical audience. "
@@ -103,15 +105,18 @@ async def get_summary(body: SummaryRequest):
         f"{json.dumps(body.data[:50])}. Write a plain-language summary."
     )
 
-    full_prompt = f"{system_prompt}\n\n{user_prompt}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
 
     try:
-        text = _generate_with_retry(client, full_prompt)
+        text = _generate_with_retry(client, messages)
         summary_cache[cache_key] = (time.time(), text)
         return SummaryResponse(summary=text)
     except Exception as e:
-        print(f"[summary] Gemini error: {e}")
-        return SummaryResponse(error="AI rate limited — try again in a minute")
+        print(f"[summary] Groq error: {e}")
+        return SummaryResponse(error=f"AI Error: {str(e)[:50]}...")
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -121,7 +126,7 @@ async def chat(body: ChatRequest):
     try:
         client = get_client()
     except ValueError:
-        return ChatResponse(error="AI service unavailable")
+        return ChatResponse(error="AI service unavailable (Key missing)")
 
     system_prompt = (
         "You are a data analyst assistant for NarrativeTrace. "
@@ -132,19 +137,15 @@ async def chat(body: ChatRequest):
         "After answering, end with: SUGGESTIONS: [q1] | [q2] | [q3]"
     )
 
-    history_text = ""
+    messages = [{"role": "system", "content": system_prompt}]
     for m in body.history:
-        role_label = "User" if m.role == "user" else "Assistant"
-        history_text += f"{role_label}: {m.content}\n"
-
-    full_prompt = (
-        f"{system_prompt}\n\n"
-        f"{history_text}"
-        f"User: {body.message}\nAssistant:"
-    )
+        # Prevent parsing errors if 'role' is exactly what Groq expects
+        role = m.role if m.role in ["user", "assistant", "system"] else "user"
+        messages.append({"role": role, "content": m.content})
+    messages.append({"role": "user", "content": body.message})
 
     try:
-        full_text = _generate_with_retry(client, full_prompt)
+        full_text = _generate_with_retry(client, messages)
 
         suggestions_match = re.search(r"SUGGESTIONS:\s*(.*)", full_text, flags=re.IGNORECASE)
         suggestions = []
@@ -157,8 +158,8 @@ async def chat(body: ChatRequest):
 
         return ChatResponse(answer=answer, suggestions=suggestions)
     except Exception as e:
-        print(f"[chat] Gemini error: {e}")
-        return ChatResponse(error="AI rate limited — try again in a minute")
+        print(f"[chat] Groq error: {e}")
+        return ChatResponse(error=f"AI Error: {str(e)[:50]}...")
 
 
 @router.get("/nomic-url")
