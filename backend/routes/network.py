@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
-import community as community_louvain  # python-louvain
-import networkx as nx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -13,7 +10,6 @@ from data_loader import get_dataframe
 router = APIRouter(prefix="/api", tags=["network"])
 
 # ── Tunables ────────────────────────────────────────────────────────
-_CO_WINDOW = np.timedelta64(7 * 24, "h")   # 7 days — wider window for sparse dataset
 _MAX_DISPLAY_NODES = 200
 
 
@@ -43,7 +39,7 @@ class NetworkResponse(BaseModel):
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
-def _build_graph(df) -> nx.DiGraph:
+def _build_graph(df):
     """Build a directed co-posting graph from the filtered dataframe.
 
     Two authors share an edge if they posted in the same subreddit
@@ -51,7 +47,11 @@ def _build_graph(df) -> nx.DiGraph:
     co-occurrences. Grouping by subreddit (community) gives far more
     connections on a small dataset than grouping by thread.
     """
+    import numpy as np
+    import networkx as nx
+
     G = nx.DiGraph()
+    co_window = np.timedelta64(7 * 24, "h")
 
     # Add every unique author as a node (even if they have 0 edges)
     post_counts: dict[str, int] = df["author"].value_counts().to_dict()
@@ -72,7 +72,7 @@ def _build_graph(df) -> nx.DiGraph:
             for j in range(i + 1, n):
                 # All comparisons stay in numpy timedelta64 space
                 delta = timestamps[j] - ts_i
-                if delta > _CO_WINDOW:
+                if delta > co_window:
                     break  # sorted, so no further j can be within window
 
                 a_i, a_j = str(authors[i]), str(authors[j])
@@ -107,6 +107,9 @@ async def get_network(
     """
     if len(query.strip()) < 2:
         raise HTTPException(status_code=400, detail="Query must be at least 2 characters")
+
+    import networkx as nx
+    import community as community_louvain
 
     df = get_dataframe().copy()
 

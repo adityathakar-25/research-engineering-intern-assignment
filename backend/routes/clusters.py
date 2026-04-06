@@ -6,13 +6,8 @@ import re
 from collections import Counter
 from typing import Optional
 
-import hdbscan
-import numpy as np
-import umap
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
 
 from data_loader import get_dataframe
 from routes.search import _get_collection
@@ -83,6 +78,12 @@ async def get_clusters(
     n_clusters: int = Query(8, ge=1, le=50, description="Number of clusters"),
 ):
     """Return UMAP-projected points with HDBSCAN cluster labels."""
+    import hdbscan
+    import numpy as np
+    import umap
+    from sklearn.cluster import KMeans
+    from sklearn.decomposition import PCA
+    
     df = get_dataframe().copy()
     
     # ── Filter by query ─────────────────────────────────────────────

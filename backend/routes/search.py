@@ -6,10 +6,8 @@ import pathlib
 import re
 from functools import lru_cache
 
-import chromadb
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
 
 router = APIRouter(prefix="/api", tags=["search"])
 
@@ -19,16 +17,23 @@ COLLECTION_NAME = "posts"
 MODEL_NAME = "all-MiniLM-L6-v2"
 
 
-# ── Cached loaders ─────────────────────────────────────────────────
-@lru_cache(maxsize=1)
-def _get_collection():
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    return client.get_collection(name=COLLECTION_NAME)
+_model = None
+_collection = None
 
-
-@lru_cache(maxsize=1)
 def _get_model():
-    return SentenceTransformer(MODEL_NAME)
+    global _model
+    if _model is None:
+        from sentence_transformers import SentenceTransformer
+        _model = SentenceTransformer(MODEL_NAME)
+    return _model
+
+def _get_collection():
+    global _collection
+    if _collection is None:
+        import chromadb
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        _collection = client.get_collection(name=COLLECTION_NAME)
+    return _collection
 
 
 # ── Request / Response models ───────────────────────────────────────
